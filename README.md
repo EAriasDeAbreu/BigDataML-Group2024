@@ -5,3 +5,6 @@
 - Juan Diego Heredia (_please add uniandes id_)
 - ...
 
+### Useful Links
+- [Class Repo](https://github.com/ignaciomsarmiento/BDML_202402)
+- [P-Sets Template](https://github.com/ignaciomsarmiento/PS_Repo)
