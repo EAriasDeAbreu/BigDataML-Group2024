@@ -1,0 +1,177 @@
+---
+title: "Big Data & Machine Learning 2024-2"
+author: "Edmundo Arias De Abreu"
+output:
+  rmdformats::robobook:
+    self_contained: true
+    thumbnails: true
+    lightbox: true
+    gallery: false
+    highlight: tango
+    code_folding: show
+---
+
+# Problem Set #1: Predicting Income
+
+### Members
+- Edmundo Arias De Abreu - 202110688
+- Lucia Maldonado - `add code`
+- Juan Diego Heredia - `add code`
+
+#### Date: August 9th, 2024
+
+----
+
+In the public sector, accurate reporting of individual income is critical for computing taxes. However, tax fraud of all kinds has always been a significant issue. According to the Internal Revenue Service (IRS), about 83.6% of taxes are paid voluntarily and on time in the US[^1]. One of the causes of this gap is the under-reporting of incomes by individuals. An income predicting model could potentially assist in flagging cases of fraud that could lead to the reduction of the gap. Furthermore, an income prediction model can help identify vulnerable individuals and families that may need further assistance.
+
+The objective of the problem set is to apply the concepts we learned using "real" world data. For that, we are going to scrape from the following website: [https://ignaciosarmiento.github.io/GEIH2018_sample/](https://ignaciosarmiento.github.io/GEIH2018_sample/). This website contains data for Bogotá from the 2018 _Medición de Pobreza Monetaria y Desigualdad Report_ that takes information from the GEIH.
+
+## 1.1. General Instructions
+
+The main objective is to construct a model of individual hourly wages:
+
+$$
+w = f(X) + u
+$$
+
+where \( w \) is the hourly wage, and \( X \) is a matrix that includes potential explanatory variables/predictors. In this problem set, we will focus on \( f(X) = X\beta \).
+
+The final document, in .pdf format, must contain the following sections:
+
+1. **Introduction**. The introduction briefly states the problem and if there are any antecedents. It briefly describes the data and its suitability to address the problem set question. It contains a preview of the results and main takeaways.
+
+---
+
+**Answer**
+
+`TODO`
+
+
+---
+
+
+2. **Data**. We will use data for Bogotá from the 2018 _Medición de Pobreza Monetaria y Desigualdad Report_ that takes information from the GEIH.
+
+The dataset contains all individuals sampled in Bogotá and is available at the following website: [https://ignaciosarmiento.github.io/GEIH2018_sample/](https://ignaciosarmiento.github.io/GEIH2018_sample/). To obtain the data, you must scrape the website.
+
+In this problem set, we will focus only on employed individuals older than eighteen (18) years old. Restrict the data to these individuals and perform a descriptive analysis of the variables used in the problem set. Keep in mind that in the data, there are many observations with missing data or 0 wages. I leave it to you to find a way to handle this data.
+
+When writing this section up, you must:
+
+1. **Describe the data briefly**, including its purpose, and any other relevant information.
+2. **Describe the process of acquiring the data** and if there are any restrictions to accessing/scraping these data.
+3. **Describe the data cleaning process**.
+4. **Descriptive analysis of the variables** included in your analysis. At a minimum, you should include a descriptive statistics table with its interpretation. However, I expect a deep analysis that helps the reader understand the data, its variation, and the justification for your data choices. Use your professional knowledge to add value to this section. Do not present it as a "dry" list of ingredients.
+
+
+---
+
+**Answer**
+
+### Part 1: Extracting data
+I will use standard webscraping methods to acces the data and store it in a dataframe. The data will be stored in a dataframe called `df`.
+
+#### Set-up
+```{r packages, message=FALSE, echo=TRUE, results='hide'}
+rm(list = ls())
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+
+# install and load required packages
+packages <- c("rvest", "dplyr", "httr")
+invisible(lapply(packages, function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
+  library(pkg, character.only = TRUE)
+}))
+```
+
+Next we will read the webpage by accessing its HTML contents.
+
+```{r read_html, message=FALSE, echo=TRUE, results='hide'}
+# function to scrape data for a single page dynamically
+scrape_page <- function(url) {
+  response <- GET(url)
+  if (status_code(response) != 200) {
+    stop(paste("Failed to retrieve page:", url))
+  }
+  
+  content <- content(response, "text")
+  page <- read_html(content)
+  include_element <- html_node(page, "[w3-include-html]")
+  include_url <- html_attr(include_element, "w3-include-html")
+  full_include_url <- paste0("https://ignaciomsarmiento.github.io/GEIH2018_sample/", include_url)
+  
+  included_content <- read_html(full_include_url)
+  df_page <- html_node(included_content, "table") %>% html_table()
+  
+  return(df_page)
+}
+
+```
+
+Now, we'll use our `scrape_page` function to scrape data from all 10 pages:
+
+```{r extract_data, message=FALSE, echo=TRUE, results='hide'}
+base_url <- "https://ignaciomsarmiento.github.io/GEIH2018_sample/page"
+df_list <- lapply(1:10, function(i) {
+  url <- paste0(base_url, i, ".html")
+  df_page <- scrape_page(url)
+  print(paste("Successfully scraped page", i))
+  return(df_page)
+})
+
+# append dataframes
+df <- do.call(rbind, df_list)
+
+print(paste("Dimensions of the combined dataframe:", paste(dim(df), collapse = " x ")))
+
+
+```
+
+That's it! Now we can view the `df`. The trick was that the webpage used a technique called *dynamic content loading*, where the main content (in this case, the data table) is loaded after the initial page load. Ignacio surely designed the page to load its main content (the data table) dynamically after the initial page load. This is often used to improve page load times or to separate content management, but it breaks simple web scraping techniques for various reasons (e.g., 1) the data is loaded asynchronously, meaning it's not present in the initial HTML response, hence Simple GET requests only retrieve the initial HTML, missing the dynamically loaded content; 2) dynamic content is often loaded via JavaScript-- Basic web scraping tools, which only parse HTML, can't execute JavaScript; 3) the content might be loaded with a delay, making it difficult to time when to scrape the page).
+
+Here was my solution
+
+1. First, fetch the main page.
+2. Then, locate the element with the `w3-include-html` attribute, which indicates where dynamic content should be inserted
+3. Extract the URL of the included HTML file from this attribute.
+4. Fetching and parsing this included file separately
+5. Repeat for all 10 data chunks
+
+
+```{r view_df, message=FALSE, echo=TRUE}
+# here's how the data looks like
+head(df, n = 10)
+```
+
+
+---
+
+
+
+
+
+
+
+
+[^1]: IRS, Tax Gap Estimates, 2021.
+
+## 3. Age-Wage Profile
+
+A great deal of evidence in labor economics suggests that the typical worker’s age-wage profile has a predictable path: *“Wages tend to be low when the worker is young; they rise as the worker ages, peaking at about age 50; and the wage rate tends to remain stable or decline slightly after age 50.”*
+
+In this subsection, we are going to estimate the Age-Wage profile for the individuals in this sample:
+
+$$
+\log(w) = \beta_1 + \beta_2 \text{Age} + \beta_3 \text{Age}^2 + u
+$$
+
+When presenting and discussing your results, include:
+
+- A regression table.
+- An interpretation of the coefficients and their significance.
+- A discussion of the model’s in-sample fit.
+- A plot of the estimated age-earnings profile implied by the above equation. Including a discussion of the "peak age" with its respective confidence intervals. (Note: Use bootstrap to construct the confidence intervals.)
+
+
+
