@@ -78,7 +78,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 options(repos = c(CRAN = "https://cloud.r-project.org"))
 
 # install and load required packages
-packages <- c("rvest", "dplyr", "httr")
+packages <- c("tidyverse", "ggplot2", "stargazer", "rvest", "dplyr", "httr", "boot", "broom")
 invisible(lapply(packages, function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
   library(pkg, character.only = TRUE)
@@ -152,8 +152,6 @@ head(df, n = 10)
 
 
 
-
-
 [^1]: IRS, Tax Gap Estimates, 2021.
 
 ## 3. Age-Wage Profile
@@ -163,7 +161,7 @@ A great deal of evidence in labor economics suggests that the typical worker’s
 In this subsection, we are going to estimate the Age-Wage profile for the individuals in this sample:
 
 $$
-\log(w) = \beta_1 + \beta_2 \text{Age} + \beta_3 \text{Age}^2 + u
+\log(w) = \beta_1 + \beta_2 \text{Age} + \beta_3 \text{Age}^2 + u \tag{3.1}
 $$
 
 When presenting and discussing your results, include:
@@ -172,6 +170,165 @@ When presenting and discussing your results, include:
 - An interpretation of the coefficients and their significance.
 - A discussion of the model’s in-sample fit.
 - A plot of the estimated age-earnings profile implied by the above equation. Including a discussion of the "peak age" with its respective confidence intervals. (Note: Use bootstrap to construct the confidence intervals.)
+
+
+---
+
+**Answer**
+
+Let's first keep individuals over 18 years of `age` and that are employed (e.g.,
+`acu=1`). 
+
+```{r age_wage, echo=TRUE, message=FALSE, results='hide'}
+df <- df[df$age > 18 & df$ocu == 1, ]
+names(df) <- make.names(names(df), unique = TRUE) # set df names
+
+```
+
+Next, let's deal with $0$ wages. Given that we will estimate the response using 
+a logarithmic transformation anyway, let's replace $0$ wages with a small value.
+We take the variable `y_ingLab_m` as the wage variable-- that is, nominal monthly salary for all occupations.
+We also drop missing wage values from dataset.
+
+```{r log_wages, echo=TRUE, message=FALSE, results='hide'}
+df <- df %>%
+  filter(!is.na(y_ingLab_m), !is.na(age)) %>%
+  mutate(log_wage = log(y_ingLab_m + 1))
+
+```
+    
+    
+Now we are ready to fit the model. Specifically, we estimate the model (1.1) by OLS
+```{r fit_model}
+model <- lm(log_wage ~ age + I(age^2), data = df)
+print(summary(model))
+```
+
+Next, let's apply the **Bootstrap** to estimate standard errors. The bootstrap is a resampling method that estimates the sampling distribution of a statistic by repeatedly resampling with replacement from the data. We will use the `boot` package to do this.
+
+For convenience, we define a function `boot_fn` that fits the model and returns the coefficients and the peak age. We also define a function `calc_peak_age` that calculates the peak age given the coefficients of the model. I'll show the math behind this.
+
+We start with the quadratic model for the age-wage profile:
+$$\log(w) = \beta_1 + \beta_2 \cdot Age + \beta_3 \cdot Age^2 + u$$
+
+where $w$ is the wage, $Age$ is the worker's age, and $u$ is the error term.
+
+The peak age is the point at which wages reach their maximum. At this point, the slope of the age-wage profile is zero - wages are no longer increasing with age, but haven't yet started to decrease. Hence, to find the peak age, we need to: 1) find the derivative of $\log(w)$ with respect to $Age$, 2) set this derivative to zero and solve for $Age$.
+
+For 1) we get
+
+$$\frac{\partial\log(w)}{\partial Age} = \beta_2 + 2\beta_3 \cdot Age$$
+
+setting this to zero, we get
+$$\begin{align}
+\beta_2 + 2\beta_3 \cdot Age &= 0 \\
+2\beta_3 \cdot Age &= -\beta_2 \\
+Age &= -\frac{\beta_2}{2\beta_3}
+\end{align}$$
+Therefore, the formula for the peak age is:
+$$Peak Age = -\frac{\beta_2}{2\beta_3}$$
+This expression falls in line with intuition and overall economic theory. Early in a career (young age), the positive linear term ($\beta_2 \cdot Age$) dominates, representing increasing wages due to factors like experience and skill accumulation. Later in a career (older age), the negative quadratic term ($\beta_3 \cdot Age^2$) becomes more influential, possibly representing factors like skill obsolescence or reduced productivity.
+
+We implement this into functions in $\mathtt{R}$
+
+```{r bootstrap, echo=TRUE, message=FALSE, results='hide'}
+# Bootstrap
+boot_fn <- function(data, indices) {
+  d <- data[indices,]
+  fit <- lm(log_wage ~ age + I(age^2), data = d)
+  coef <- coef(fit)
+  peak_age <- -coef[2] / (2 * coef[3])
+  return(c(coef, peak_age = peak_age))
+}
+
+# peak age
+calc_peak_age <- function(data, indices) {
+  d <- data[indices,]
+  model <- lm(log_wage ~ age + I(age^2), data = d)
+  coef <- coef(model)
+  peak_age <- -coef[2] / (2 * coef[3])
+  return(peak_age)
+}
+
+# do bootstrap
+set.seed(555)
+boot_results <- boot(data = df, statistic = boot_fn, R = 1000)
+
+# bootstrap se's
+boot_se <- apply(boot_results$t, 2, sd)
+
+
+```
+
+I can next present this in a regression table, while annexing the estimated 'peak age' and its confidence intervals (via the bootstrap).
+
+```{r reg_table, echo=TRUE, message=FALSE}
+
+# reg table
+stargazer(model, se = list(boot_se), type = "text", 
+          title = "Age-Wage Profile Regression Results",
+          column.labels = c("Coefficients", "Bootstrap SE"))
+
+# peak age & CI's
+original_peak_age <- -coef(model)[2] / (2 * coef(model)[3])
+ci_peak <- quantile(boot_results$t[,4], c(0.025, 0.975))
+
+cat("\nPeak Age Analysis:\n")
+cat("Estimated Peak Age:", round(original_peak_age, 2), "\n")
+cat("95% CI for Peak Age:", round(ci_peak[1], 2), "to", round(ci_peak[2], 2), "\n\n")
+
+```
+
+
+Finally, we can visualize this relationship by plotting the estimated age-wage profile. We can also include the peak age and its confidence intervals to be clear.
+
+```{r plot, echo=TRUE, message=FALSE, fig.width=10, fig.height=6, out.width="100%"}
+
+# plot
+new_data <- data.frame(age = seq(min(df$age), max(df$age), length.out = 100))
+new_data$predicted_log_wage <- predict(model, newdata = new_data)
+
+p <- ggplot(df, aes(x = age, y = log_wage)) +
+  geom_point(alpha = 0.1) +
+  geom_line(data = new_data, aes(y = predicted_log_wage), color = "red") +
+  geom_vline(xintercept = original_peak_age, color = "blue", linetype = "dashed") +
+  geom_vline(xintercept = ci_peak[1], color = "green", linetype = "dashed") +
+  geom_vline(xintercept = ci_peak[2], color = "green", linetype = "dashed") +
+  # Add horizontal line at the estimated peak wage
+  geom_hline(yintercept = predict(model, newdata = data.frame(age = original_peak_age)), 
+             color = "blue", linetype = "dashed") +
+  # Add text annotation for peak age
+  annotate("text", x = original_peak_age, y = min(df$log_wage), 
+           label = paste("Peak Age:", round(original_peak_age, 1)), 
+           vjust = -0.5, hjust = 1.1, color = "blue") +
+  labs(title = "Age-Wage Profile",
+       x = "Age", y = "Log Wage",
+       caption = "Blue dashed lines: Estimated peak age and wage\nGreen dashed lines: 95% CI") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))  # Center the title
+
+# Display the plot
+print(p)
+
+```
+
+
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
