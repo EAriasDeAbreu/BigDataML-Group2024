@@ -154,7 +154,7 @@ head(df, n = 10)
 
 [^1]: IRS, Tax Gap Estimates, 2021.
 
-## 3. Age-Wage Profile
+# 3. Age-Wage Profile
 
 A great deal of evidence in labor economics suggests that the typical worker’s age-wage profile has a predictable path: *“Wages tend to be low when the worker is young; they rise as the worker ages, peaking at about age 50; and the wage rate tends to remain stable or decline slightly after age 50.”*
 
@@ -307,12 +307,108 @@ p <- ggplot(df, aes(x = age, y = log_wage)) +
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5))  # Center the title
 
-# Display the plot
+# the plot
 print(p)
 
 ```
 
+# 4. The Gender Earnings *GAP*
 
+## a) Unconditional Gap
+We begin by estimating and discussing the unconditional wage earnings gap between men and women in the sample:
+$$log(w) = \beta_1 + \beta_2\text{Female} + u$$
+```{r unconditional_gap, echo=TRUE, message=FALSE}
+library(sandwich)
+library(lmtest)
+library(fixest)
+model_gap <- lm(log_wage ~ sex, data = df)
+robust_se <- vcovHC(model_gap, type = "HC1") # using ,r 
+robust_summary <- coeftest(model_gap, vcov = robust_se)
+print(robust_summary)
+```
+We see that Men earn on average 15.1% more than women in terms of wages. The effect is both statistical and economically significant, suggesting a notable gender wage gap. While this unconditional gap is informative, we should be very careful to attribute any sort of *causal* interpretation to this gap. There are many factors that could be driving this gap: education, experience, occupation, self-selection, etc. 
+
+## b) Conditional Gap: FWL meets Boostrap
+
+### i) FWL
+First, we estimate a conditional earnings gap incorporating control variables such as similar worker and job characteristics.
+
+
+```{r conditional_gap1, echo=TRUE, message=FALSE}
+controls <- c("age", "college", "formal", "oficio")
+
+# formulas for including controls more easily
+formula_controls <- as.formula(paste("log_wage ~", paste(controls, collapse = " + ")))
+formula_controls_sex <- as.formula(paste("sex ~", paste(controls, collapse = " + ")))
+
+# 1: partial out the controls
+residuals_y <- feols(formula_controls, data = df)$residuals
+residuals_sex <- feols(formula_controls_sex, data = df)$residuals
+
+# 2: regress residuals
+fwl_model <- lm(residuals_y ~ residuals_sex)
+
+fwl_coef <- coef(fwl_model)[2]
+fwl_se <- sqrt(vcov(fwl_model)[2,2])
+
+# show results
+cat("Frisch-Waugh-Lovell Results:\n")
+cat("Coefficient:", fwl_coef, "\n")
+cat("Standard Error (Normal):", fwl_se, "\n")
+
+```
+
+### i) FWL + Bootstrap
+Next, we estimate the standard errors using the bootstrap method. We define a function `boot_fwl` (see previous section) that fits the model and returns the coefficient of interest. We then apply the bootstrap method to estimate the standard errors.
+
+```{r conditional_gap2, echo=TRUE, message=FALSE}
+
+boot_fwl <- function(data, indices) {
+  resid_y <- residuals_y[indices]
+  resid_sex <- residuals_sex[indices]
+  boot_model <- lm(resid_y ~ resid_sex)
+  return(coef(boot_model)[2])
+}
+
+# bootstrap
+set.seed(555)
+boot_se <- sd(boot_results$t)
+
+cat("Standard Error (Bootstrap):", boot_se, "\n")
+```
+`TODO:` Fix boostrap SE: in the chunk it shows fine but not in knitted document.
+We can present these results in a table
+
+```{r fwl_table, echo=TRUE, message=FALSE}
+fwl_model <- lm(residuals_y ~ residuals_sex)  # FWL model with normal SE
+fwl_boot_model <- lm(residuals_y ~ residuals_sex)  # FWL model for bootstrapping
+
+fwl_coef <- coef(fwl_model)[2]
+fwl_se <- sqrt(vcov(fwl_model)[2,2])
+
+# coef & se matrix
+coef_matrix <- matrix(fwl_coef, nrow = 1, ncol = 1)
+colnames(coef_matrix) <- "FWL Coefficient"
+rownames(coef_matrix) <- "Residuals Sex"
+se_matrix <- matrix(c(fwl_se, boot_se), nrow = 1, ncol = 2)
+colnames(se_matrix) <- c("Normal SE", "Bootstrap SE")
+rownames(se_matrix) <- "Residuals Sex"
+
+# table
+stargazer(fwl_model,
+          type = "text",
+          coef = coef_matrix,
+          se = se_matrix,
+          title = "Conditional Gender Wage Gap: FWL meets Bootstrap",
+          covariate.labels = "Gender (Residuals)",
+          dep.var.labels = "Log Wage Residuals",
+          out = "conditional_gap_table.txt",
+          add.lines = list(
+            c("Bootstrap SE", format(boot_se, digits = 3))
+          )
+)
+
+```
 ---
 
 
