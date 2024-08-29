@@ -312,6 +312,7 @@ ggplot(df, aes(x = age, y = log_wage, color = factor(sex))) +
 
 
 
+# Part IV: Predicting Wage  ----------------------------------------------#
 
 
 

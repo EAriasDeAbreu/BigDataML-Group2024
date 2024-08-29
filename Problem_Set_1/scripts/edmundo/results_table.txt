@@ -1,0 +1,10 @@
+
+Frisch-Waugh-Lovell Theorem Results
+=========================================================
+Coefficient                                Statistic     
+---------------------------------------------------------
+Coefficient                                 0.22470      
+Standard Error (Normal)                     0.01312      
+Standard Error (Bootstrap)                  0.01314      
+---------------------------------------------------------
+Bootstrap standard errors are based on 1000 replications 
