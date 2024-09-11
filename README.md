@@ -2,7 +2,7 @@
 ## Team:
 - Edmundo Arias De Abreu (202110688)
 - Lucia Maldonado (202012558)
-- Juan Diego Heredia (_please add uniandes id_)
+- Juan Diego Heredia (201813809)
 - ...
 
 ### Useful Links
